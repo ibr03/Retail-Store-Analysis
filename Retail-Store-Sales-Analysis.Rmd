@@ -1,0 +1,320 @@
+---
+title: "Retail Store Sales Analysis"
+author: "Ibrahim Abdullah"
+date: "2022-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Retail Store Sales Case Study
+
+November 28, 2022
+***
+
+# 1. Summary
+
+The goal of this case study is to analyze a business task following through all steps of data analysis process: Ask, Prepare, Process, Analyze, Share, and Act. The business task is to analyze retail store weekly sales across different geographical areas and provide recommendations for marketing strategy. I will be using [Retail Data Analytics](https://www.kaggle.com/datasets/manjeetsingh/retaildataset) dataset that includes historical sales data of 45 stores located in different regions - each store contains a number of departments. The company also runs several promotional markdown events throughout the year. 
+
+# 2. Ask Phase
+
+We have to recommend actions which have the largest business impact for the retail stores and predict the department-wide sales for each store for the following year. The effects of markdown on holiday weeks has to be included.
+
+# 3. Prepare Phase
+
+[Retail Data Analytics](https://www.kaggle.com/datasets/manjeetsingh/retaildataset) (CC0: Public Domain, dataset made available through Manjeet Singh) is an archive of 3 csv files namely Stores, Features, and Sales. 
+***Sales*** file contains anonymized information about 45 stores indicating their type (A, B, C) and size but details regarding the type nor the units of measurement of size are provided. 
+***Features*** file contains additional data related to store, department, and regional activity for the given dates like Temperature (again, no units provided but assuming them to be in Celsius degrees), Fuel_Price (currency not mentioned), MarkDown1-5 (currency not mentioned), CPI (Consumer Price Index), Unemployment (unemployment rate) and IsHoliday (whether week is a special holiday week).
+***Sales*** Historical sales data, from 2010-02-05 to 2012-11-01. Attributes included in this file are - Store (store number), Dept (department number), Date (week), Weekly_Sales (currency not mentioned), IsHoliday (whether week is a special holiday week).
+
+Tools which are going to be used for analysis:-
+1. Microsoft Excel for exploratory analysis
+2. RStudio for data cleaning
+3. RStudio for data analysis and visualization
+
+# 4. Process Phase
+
+After inspecting the 3 data sets in Excel, we have some common attributes like Date, IsHoliday which we can use to merge the Sales and Features datasets, but first let's upload the files in RStudio and learn more about the datasets.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(skimr)
+library(psych)
+library(ggplot2)
+library(reshape2)
+library(DataExplorer)
+library(scales)
+```
+
+```{r}
+
+stores <- read.csv("C:\\Users\\Ibrahim\\Desktop\\Google Data Analytics Course\\Capstone Projects\\Retail Store Data Analytics\\Dataset\\archive\\stores data-set.csv")
+features <- read.csv("C:\\Users\\Ibrahim\\Desktop\\Google Data Analytics Course\\Capstone Projects\\Retail Store Data Analytics\\Dataset\\archive\\Features data set.csv")
+sales <- read.csv("C:\\Users\\Ibrahim\\Desktop\\Google Data Analytics Course\\Capstone Projects\\Retail Store Data Analytics\\Dataset\\archive\\sales data-set.csv")
+
+```
+
+We can check how the data frames look like.
+
+```{r}
+head(stores)
+head(features)
+head(sales)
+```
+
+Information about tables using glimpse function.
+
+```{r}
+glimpse(stores)
+glimpse(features)
+glimpse(sales)
+```
+
+Checking distinct store numbers and department numbers:
+
+```{r}
+n_distinct(stores$Store) #checking store Ids 
+
+n_distinct(features$Date) #checking before merging with sales
+
+n_distinct(sales$Date)
+n_distinct(sales$Store)
+n_distinct(sales$Dept)
+```
+
+There are 45 distinct store numbers but we have weekly sales data for 143 unique dates and 81 departments.
+
+Check for NAs:
+
+```{r}
+sum(is.na(sales))
+sum(is.na(features))
+sum(is.na(sales))
+```
+The markdown columns in the features dataset have these NA values which we can keep for now before merging with sales dataset.
+
+The Date column is in character format so we need to convert them into date-time format.
+
+```{r}
+
+features$Date <- as.Date(features$Date, "%d/%m/%Y")
+sales$Date <- as.Date(sales$Date, "%d/%m/%Y")
+```
+
+Now we can merge features and sales data frames:
+
+```{r}
+features_date <- aggregate(list("Temperature" = features$Temperature, "Fuel_Price" = features$Fuel_Price, "CPI" = features$CPI, "Unemployment" = features$Unemployment), by = list("Date" = features$Date), FUN=mean, na.rm = TRUE)
+
+features_date <- features_date %>% 
+  mutate(aggregate(list("IsHoliday" = features$IsHoliday), by = list("Date" = features$Date), FUN = sum, na.rm = TRUE))
+```
+
+```{r}
+# Data is already sorted by Dates
+sales_date <- aggregate(list("Weekly_Sales" = sales$Weekly_Sales), by= list("Date" = sales$Date), FUN=sum, na.rm = TRUE)
+# Converting sales into Millions
+sales_date$Weekly_Sales <- as.integer(sales_date$Weekly_Sales / 1000000)
+
+```
+
+```{r}
+# Merging the features_date and sales_date datasets
+sales_complete <- merge(sales_date, features_date, by = "Date", all.sales_date = TRUE)
+head(sales_complete)
+
+```
+
+
+# 5. Analysis Phase
+
+Let's analyze if there are any strong correlations between attributes in the merged dataset.
+
+```{r}
+# build a density plot
+sales_complete %>% plot_density(ncol = 4, ggtheme = theme_minimal())
+# build correlation plot
+corPlot(sales_complete[,2:7], upper = FALSE, scale = FALSE, main = "Correlation in Sales Attributes")
+
+```
+
+We can see that weekly sales does not show any strong correlation with any other parameter, but following are the major correlations found:-
+* Interestingly, ***CPI*** (which is a measure of inflation) show a strong negative correlation with ***Unemployment***, which is not apparently obvious and needs further investigation if we need to draw any inference
+* ***CPI*** shows a strongly positive correlation with ***Fuel_Price***, which is evident as when inflation increases, the prices of fuel would also increase.
+* ***Unemployment*** is also negatively correlated with ***Fuel_Price***, this is also not very apparent and needs further investigation to draw inferences
+
+
+```{r}
+
+plot_sales <- gather(sales_complete, "attribs", "Value", -Date, -IsHoliday) 
+
+ggplot(plot_sales, aes(Date, Value)) + geom_line(aes(color = Value), linewidth = 1) + facet_grid(attribs~., scales = "free_y", #adjust scales
+                                                                                  switch = "y") + #switch y-axis labels to left
+  ylab(NULL) + #remove the label "Value"
+  theme(strip.background = element_blank(), #remove the background
+        strip.placement = "outside", strip.text.y.left = element_text(angle = 0), legend.position = "none") + scale_x_date(date_breaks = "5 months", date_labels = '%Y-%m') 
+
+```
+
+* Average weekly sales tend to shoot up in the last two months of the year but overall remain almost constant through out the year.
+
+* Fuel price and CPI (Consumer Price Index) increased over the years from 2010 till the end of 2012.
+
+* Unemployment rates have decreased year after year at an almost constant rate.
+
+* Temperature changes in a constant pattern round the year as expected from seasonal changes. 
+
+We can further check if there is any specific months when the weekly sales are generally higher.
+
+```{r}
+sales_monthly <- sales_complete %>% group_by(month = lubridate::floor_date(Date, "month")) %>% summarize("Weekly_Sales" = sum(Weekly_Sales))
+
+sales_monthly <- sales_monthly %>% mutate(Month = as.integer(lubridate::month(month)), Year = lubridate::year(month)) %>% group_by(Month) %>%
+  summarize("Sales" = sum(Weekly_Sales))
+
+```
+
+```{r}
+
+ggplot(sales_monthly, aes(x = Month, y = Sales, fill=as.factor(Sales))) + geom_col() + guides(fill="none") + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) + scale_fill_discrete() + labs(title = "Monthly Sales")+ theme(plot.title = element_text(hjust = 0.5))
+
+```
+* During the 3 year period, it can be observed that the sales in the month of November are lower as people wait for year-end sales in December as it could be a pre-holidays shopping for festivals like Christmas and New Year and after a heavy shopping spree in December, sales dip lower again in January due to holidays.
+
+* Monthly total sales stay high around the year with peaks in April and July suggesting high customer spending behaviour in late spring and summer months.
+
+```{r}
+
+sales_yearly <- sales_complete %>% group_by(year = lubridate::floor_date(Date, "year")) %>% summarize("Sales" = sum(Weekly_Sales))
+
+ggplot(sales_yearly, aes(x = year, y = Sales, fill=as.factor(Sales))) + geom_col() + guides(fill="none") + scale_fill_discrete() + labs(title = "Yearly Sales")+ theme(plot.title = element_text(hjust = 0.5))
+
+```
+On an yearly basis, the total sales from year 2010 to 2011 increase by 6% but show a surprising decline by approximately 22% in the year 2012.
+
+We can further investigate if there is any trend or correlation with different store types. 
+
+```{r}
+
+stores_agg <- aggregate(list("Temperature" = features$Temperature, "Fuel_Price" = features$Fuel_Price), by = list("Store" = features$Store), FUN=mean, na.rm = TRUE)
+
+stores_agg <- stores_agg %>% mutate(aggregate(list("IsHoliday" = features$IsHoliday), by = list("Store" = features$Store), FUN=sum, na.rm = TRUE))
+
+temp_store <- aggregate(list("Weekly_Sales" = sales$Weekly_Sales), by = list("Store" = sales$Store), FUN=sum, na.rm = TRUE)
+
+temp_store$Weekly_Sales <- as.integer(temp_store$Weekly_Sales / 1000000)
+
+stores <- stores %>% mutate("Temp" = stores_agg$Temperature) 
+stores <- stores %>% mutate("Fuel_Price" = stores_agg$Fuel_Price) 
+stores <- stores %>% mutate("Holiday" = stores_agg$IsHoliday) 
+stores <- stores %>% mutate("Weekly_Sales" = temp_store$Weekly_Sales)
+
+str(stores)
+
+```
+```{r}
+
+ggplot(stores, aes(x = Type, y = Size, fill = Type)) +  geom_col() + guides(fill="none") + scale_y_continuous(labels=comma)
+ggplot(stores, aes(x = Type, y = Weekly_Sales, fill = Type)) + geom_boxplot() + guides(fill="none") 
+```
+
+* Type A stores are the largest with highest sales, followed by B and then C. 
+* We can notice a relationship between the size of retail stores and the weekly sales, the bigger the size of the store, higher the weekly sales, however, stores of Type B, being of smaller sizes than type A, have higher minimum weekly sales than store A. 
+
+Next, we will try to find any relationship of weekly sales with different store departments.
+
+```{r}
+# Checking number of unique departments
+n_distinct(sales$Dept)
+#Grouping departments by sales
+dept_data <- aggregate(list("Weekly_Sales" = sales$Weekly_Sales), by = list("Dept" = sales$Dept), FUN=sum, na.rm = TRUE)
+
+dept_data$Weekly_Sales <- as.integer(dept_data$Weekly_Sales / 1000000)
+
+dept_data[order(dept_data$Weekly_Sales),]
+
+```
+```{r}
+
+ggplot(dept_data, aes(x = Dept, y = Weekly_Sales, fill = "light pink")) + geom_col() + labs(title = "Department vs Weekly Sales") + theme(plot.title = element_text(hjust = 0.5)) + guides(fill="none")
+
+
+```
+```{r}
+dept_data[which.max(dept_data$Weekly_Sales),]
+dept_data[which.min(dept_data$Weekly_Sales),]
+dept_data[dept_data$Weekly_Sales == 0,]
+```
+
+
+Some key observations:-
+
+* Departments 90 to 95 have high weekly sales, (dept. 92 having the highest of all departments with 483 million (currency not specified in the data source)). Departments 2, 38, 40 and 72 also in particular have higher sales than their neighboring departments.
+
+* 9 departments have zero sales (dept. 39, 43, 45, 47, 51, 54, 77, 78, 99)
+
+Moving on to ***markdowns***:
+
+Typically, markdowns are expressed in [percentages](https://www.indeed.com/career-advice/career-development/how-to-calculate-markdown) but in this data set it is not clearly specified so I am assuming the markdown values expressed in terms of absolute price differences. 
+
+```{r}
+# Aggregate weekly sales by Date and Store
+sales_date_store <- aggregate(list("Weekly_Sales" = sales$Weekly_Sales), by = list("Date" = sales$Date, "Store" = sales$Store), FUN=sum, na.rm = TRUE)
+# Converting weekly sales into millions
+sales_date_store$Weekly_Sales <- as.integer(sales_date_store$Weekly_Sales / 1000000)
+# Merging features data set with sales_date_store
+sales_stores_combined <- merge(features, sales_date_store, by = c("Date", "Store"), all.features = TRUE)
+
+```
+
+```{r}
+# Adding Store number and type column in the sales_stores_combined dataset 
+sales_stores_combined <- merge(sales_stores_combined, stores[c("Store", "Type")], by = "Store", all.sales_stores_combined = TRUE)
+
+sales_stores_combined <- sales_stores_combined[,-15:-19]
+# Omitting all NA values
+clean_sales_stores <- na.omit(sales_stores_combined)
+# Aggregating average markdown values by Date
+markdowns <- aggregate(list("Markdown1" = clean_sales_stores$MarkDown1, "Markdown2" = clean_sales_stores$MarkDown2, "Markdown3" = clean_sales_stores$MarkDown3, "Markdown4" = clean_sales_stores$MarkDown4), by = list("Date" = clean_sales_stores$Date), FUN=mean, na.rm = TRUE)
+
+```
+
+```{r}
+# Plotting the markdowns as trending lines
+
+ggplot(markdowns, aes(x = Date, y = Markdowns)) + geom_line(aes(y = Markdown1, colour = "Markdown1"),  linewidth = 1) + geom_line(aes(y = Markdown2, colour = "Markdown2"),linewidth = 1) + geom_line(aes(y = Markdown3, colour = "Markdown3"),linewidth = 1) + geom_line(aes(y = Markdown4, colour = "Markdown4"),linewidth = 1) 
+
+```
+
+Markdowns have erratic peak values round the year but it is interesting to note the high values of all markdowns around the holiday season (December 2011 to Jan 2012) as the sales go higher during this time of the year. 
+
+More information on the types of markdowns is needed to draw any concrete inferences. 
+
+# 6. Conclusion
+
+By the end of the analysis, we can conclude following:-
+
+* Weekly sales increase at the end of the year due to holidays and high markdowns (discounted prices)
+
+* Weekly sales of stores of bigger sizes are generally higher than stores of smaller sizes. Stores of type A are the largest, followed by B and then C being the smallest size stores. However, the minimum weekly sales of store B are higher than that of store A.
+
+* Departments 90 to 95 have high weekly sales. Departments 2, 38, 40 and 72 also in particular have higher sales than their neighboring departments but more information is needed regarding the departments like what kind of products do these departments sell.
+
+* Year 2011 had the highest sales in comparison to year 2010 and year 2012. The month of July witnessed the highest sales in comparison to other months, followed by April and October. 
+
+# 7. References
+
+* [Bellabeat Case Study](https://www.kaggle.com/code/yuliamur/bellabeat-case-study-capstone-project)
+
+* [Retail Data Analysis](https://www.kaggle.com/code/shubhamsinghgharsele/retail-data-analysis)
+
+* [Markdowns](https://www.indeed.com/career-advice/career-development/how-to-calculate-markdown)
+
+* [CPI](https://www.investopedia.com/terms/c/consumerpriceindex.asp)
+
+
+
